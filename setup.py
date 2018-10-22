@@ -12,6 +12,8 @@ setup(
     install_requires=[
         'asynctnt==0.2.0',
         'asynctnt-queue==0.0.5',
-        'structlog==18.1.0'
+        'structlog==18.1.0',
+        'rapidjson==1.0.0',
+        'sanic_envconfig==1.0.1'
     ]
 )
