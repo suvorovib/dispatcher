@@ -116,8 +116,12 @@ class Dispatcher:
                     log.info(f'Processing task {task.origin_task}')
 
                     try:
-                        await handler.handle(context, task.payload)
-                        await task.origin_task.ack()
+                        result = await handler.handle(self, context, task.payload)
+
+                        if result:
+                            await task.origin_task.ack()
+                        else:
+                            await task.origin_task.touch(-1)
                     except Exception as e:
                         log.error(f'Processing fail task {task.origin_task}:{e}')
 
