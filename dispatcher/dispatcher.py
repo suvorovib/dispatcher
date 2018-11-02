@@ -12,11 +12,11 @@ from .handler import BaseHandle
 from .hook import HookTypes, HookHandler
 
 import asyncio
-from asyncio import BaseEventLoop
+from asyncio import BaseEventLoop, sleep
 
 from queues import Queues
 
-log = get_logger('microbase')
+log = get_logger('dispatcher')
 
 class Dispatcher:
 
@@ -24,6 +24,7 @@ class Dispatcher:
     config: BaseConfig
     _hooks: List[Tuple]
     _handlers: List
+    _tube: str
 
     def __init__(self):
         self._init_config()
@@ -87,11 +88,12 @@ class Dispatcher:
             if hook_name == HookTypes.after_server_stop:
                 hook_handler(context)
 
-    def run(self):
+    def run(self, tube: str):
+        self._tube = tube
         self.prepare()
-        workers_futures = [self._worker(id) for id in range(self.config.WORKERS)]
 
         loop = asyncio.get_event_loop()
+        workers_futures = [self._worker(id, self._tube) for id in range(self.config.WORKERS)]
 
         self._before_start()
 
@@ -101,19 +103,22 @@ class Dispatcher:
 
         loop.close()
 
-    async def _worker(self, id: int):
+    def app_context(self) -> Context:
+        return context
+
+    async def _worker(self, id: int, tube: str):
         if self.queues.is_connected == False:
             await self.queues.connect()
 
         while True:
-            task = await self.queues.take_email_dispatch_task()
+            task = await self.queues.take_task(tube)
 
             if task is None:
                 continue
 
             for handler in self._handlers:
                 if handler.type == task.type:
-                    log.info(f'Processing task {task.origin_task}')
+                    log.info(f'Processing task {task.type} {task.origin_task}')
 
                     try:
                         result = await handler.handle(self, context, task.payload)
@@ -121,8 +126,9 @@ class Dispatcher:
                         if result:
                             await task.origin_task.ack()
                         else:
-                            await task.origin_task.touch(-1)
+                            await task.origin_task.release(delay=1)
                     except Exception as e:
                         log.error(f'Processing fail task {task.origin_task}:{e}')
+                        await task.origin_task.release()
 
                     break

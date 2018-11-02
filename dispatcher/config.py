@@ -1,4 +1,4 @@
-__all__ = ['BaseConfig']
+__all__ = ['BaseConfig', 'GeneralConfig']
 
 import os
 from sanic_envconfig import EnvConfig
