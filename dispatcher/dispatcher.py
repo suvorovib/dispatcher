@@ -10,6 +10,7 @@ from .context import Context, context, _context_mutable
 from .helpers import get_logging_config
 from .handler import BaseHandle
 from .hook import HookTypes, HookHandler
+from .result import WorkResult, ResultAction
 
 import asyncio
 from asyncio import BaseEventLoop, sleep
@@ -17,6 +18,7 @@ from asyncio import BaseEventLoop, sleep
 from queues import Queues
 
 log = get_logger('dispatcher')
+
 
 class Dispatcher:
 
@@ -78,15 +80,15 @@ class Dispatcher:
                              username=self.config.TARANTOOL_USER,
                              password=self.config.TARANTOOL_PASSWORD)
 
-    def _before_start(self):
+    def _before_start(self, loop: BaseEventLoop):
         for (hook_name, hook_handler) in self._hooks:
             if hook_name == HookTypes.before_server_start:
-                hook_handler(context)
+                loop.run_until_complete(hook_handler(context))
 
-    def _after_stop(self):
+    def _after_stop(self, loop: BaseEventLoop):
         for (hook_name, hook_handler) in self._hooks:
             if hook_name == HookTypes.after_server_stop:
-                hook_handler(context)
+                loop.run_until_complete(hook_handler(context))
 
     def run(self, tube: str):
         self._tube = tube
@@ -95,11 +97,11 @@ class Dispatcher:
         loop = asyncio.get_event_loop()
         workers_futures = [self._worker(id, self._tube) for id in range(self.config.WORKERS)]
 
-        self._before_start()
+        self._before_start(loop)
 
         loop.run_until_complete(asyncio.wait(workers_futures))
 
-        self._after_stop()
+        self._after_stop(loop)
 
         loop.close()
 
@@ -121,12 +123,17 @@ class Dispatcher:
                     log.info(f'Processing task {task.type} {task.origin_task}')
 
                     try:
-                        result = await handler.handle(self, context, task.payload)
+                        result: WorkResult = await handler.handle(self, context, task.payload)
 
-                        if result:
+                        if result is None:
+                            result = WorkResult()
+
+                        if result.action == ResultAction.ack:
                             await task.origin_task.ack()
-                        else:
-                            await task.origin_task.release(delay=1)
+                        elif result.action == ResultAction.release:
+                            await task.origin_task.release(delay=result.delay)
+                        elif result.action == ResultAction.delete:
+                            await task.origin_task.delete()
                     except Exception as e:
                         log.error(f'Processing fail task {task.origin_task}:{e}')
                         await task.origin_task.release()

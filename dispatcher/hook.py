@@ -1,3 +1,4 @@
+import inspect
 from enum import Enum
 from typing import Callable, Any
 
@@ -18,5 +19,8 @@ class HookHandler(object):
         self._dispatcher = dispatcher
         self._handler = handler
 
-    def __call__(self, context: Context):
-        self._handler(self._dispatcher, context)
+    async def __call__(self, context: Context):
+        if inspect.iscoroutinefunction(self._handler):
+            await self._handler(self._dispatcher, context)
+        else:
+            self._handler(self._dispatcher, context)
