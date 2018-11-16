@@ -8,20 +8,20 @@ class LogFormat(Enum):
     json = 'json'
     plain = 'plain'
 
-class BaseConfig(dict):
+class BaseConfig(EnvConfig):
 
     DEBUG: bool = False
     LOG_FORMAT: LogFormat = LogFormat.plain
     LOG_LEVEL: str = 'INFO'
 
-    def __getattr__(self, attr):
-        try:
-            return self[attr]
-        except KeyError as ke:
-            raise AttributeError("Config has no '{}'".format(ke.args[0]))
-
-    def __setattr__(self, attr, value):
-        self[attr] = value
+    # def __getattr__(self, attr):
+    #     try:
+    #         return self[attr]
+    #     except KeyError as ke:
+    #         raise AttributeError("Config has no '{}'".format(ke.args[0]))
+    #
+    # def __setattr__(self, attr, value):
+    #     self[attr] = value
 
 
 class GeneralConfig(BaseConfig):

@@ -53,7 +53,7 @@ class Dispatcher:
     def _import_config(self, config_obj: ClassVar[BaseConfig]):
         for key in dir(config_obj):
             if key.isupper():
-                self.config[key] = getattr(config_obj, key)
+                self.config.__setattr__(key, getattr(config_obj, key))
 
     def add_to_context(self, name, obj):
         _context_mutable.set(name, obj)
