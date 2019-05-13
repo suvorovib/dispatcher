@@ -1,6 +1,6 @@
 import logging.config
 from structlog import get_logger
-from typing import List, Tuple, Callable, Sequence, Type, Union, ClassVar
+from typing import List, Tuple, Callable, Sequence, Type, Union, ClassVar, Dict
 
 from enum import Enum
 
@@ -25,7 +25,7 @@ class Dispatcher:
     queues: Queues
     config: BaseConfig
     _hooks: List[Tuple]
-    _handlers: List
+    _handlers: Dict[BaseHandle.type, BaseHandle.handle]
     _tube: str
 
     def __init__(self):
@@ -42,7 +42,7 @@ class Dispatcher:
         logging.config.dictConfig(self._logging_config)
 
     def _init_handlers(self):
-        self._handlers = []
+        self._handlers = {}
 
     def _init_hooks(self):
         self._hooks = []
@@ -59,7 +59,8 @@ class Dispatcher:
         _context_mutable.set(name, obj)
 
     def add_handlers(self, handlers: List[BaseHandle]):
-        self._handlers.extend(handlers)
+        for handler in handlers:
+            self._handlers[handler.type] = handler.handle
 
     def add_hook(self, name: HookTypes, handle):
         if not isinstance(name, HookTypes):
@@ -118,24 +119,22 @@ class Dispatcher:
             if task is None:
                 continue
 
-            for handler in self._handlers:
-                if handler.type == task.type:
-                    log.info(f'Processing task {task.type} {task.origin_task}')
+            if task.type in self._handlers.keys():
+                log.info(f'Processing task {task.type} {task.origin_task}')
 
-                    try:
-                        result: WorkResult = await handler.handle(self, context, task.payload)
+                try:
+                    handle = self._handlers[task.type]
+                    result: WorkResult = await handle(self, context, task.payload)
 
-                        if result is None:
-                            result = WorkResult()
+                    if result is None:
+                        result = WorkResult()
 
-                        if result.action == ResultAction.ack:
-                            await task.origin_task.ack()
-                        elif result.action == ResultAction.release:
-                            await task.origin_task.release(delay=result.delay)
-                        elif result.action == ResultAction.delete:
-                            await task.origin_task.delete()
-                    except Exception as e:
-                        log.error(f'Processing fail task {task.origin_task}:{e}')
-                        await task.origin_task.release()
-
-                    break
+                    if result.action == ResultAction.ack:
+                        await task.origin_task.ack()
+                    elif result.action == ResultAction.release:
+                        await task.origin_task.release(delay=result.delay)
+                    elif result.action == ResultAction.delete:
+                        await task.origin_task.delete()
+                except Exception as e:
+                    log.error(f'Processing fail task {task.origin_task}:{e}')
+                    await task.origin_task.release()
