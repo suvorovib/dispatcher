@@ -94,12 +94,14 @@ class Dispatcher:
         self._tube = tube
         self.prepare()
         loop = asyncio.get_event_loop()
+        asyncio_queue = asyncio.Queue(maxsize=5)
         try:
-            producers = [self._producer(id, self._tube) for id in range(self.config.WORKERS)]
+            producers = [self._producer(asyncio_queue, id, self._tube) for id in range(self.config.WORKERS)]
     
             self._before_start(loop)
     
             [loop.create_task(producer) for producer in producers]
+            loop.create_task(self._consumer(asyncio_queue))
             loop.run_forever()
             
             self._after_stop(loop)
@@ -111,38 +113,7 @@ class Dispatcher:
     def app_context(self) -> Context:
         return context
 
-    #  deprecated
-    async def _worker(self, id: int, tube: str):
-        if self.queues.is_connected == False:
-            await self.queues.connect()
-
-        while True:
-            task = await self.queues.take_task(tube)
-
-            if task is None:
-                continue
-
-            if task.type in self._handlers.keys():
-                log.info(f'Processing task {task.type} {task.origin_task}')
-
-                try:
-                    handle = self._handlers[task.type]
-                    result: WorkResult = await handle(self, context, task.payload)
-
-                    if result is None:
-                        result = WorkResult()
-
-                    if result.action == ResultAction.ack:
-                        await task.origin_task.ack()
-                    elif result.action == ResultAction.release:
-                        await task.origin_task.release(delay=result.delay)
-                    elif result.action == ResultAction.delete:
-                        await task.origin_task.delete()
-                except Exception as e:
-                    log.error(f'Processing fail task {task.origin_task}:{e}')
-                    await task.origin_task.release()
-
-    async def _producer(self, id: int, tube: str):
+    async def _producer(self, asyncio_queue, id: int, tube: str):
         if not self.queues.is_connected:
             await self.queues.connect()
 
@@ -152,12 +123,17 @@ class Dispatcher:
             if task is None:
                 continue
             log.info(f'Producer [{id}] put task {task.type} {task.origin_task}')
-            asyncio.ensure_future(self._consumer(task))
+            await asyncio_queue.put(task)
 
-    async def _consumer(self, task):
+    async def _consumer(self, asyncio_queue):
+        while True:
+            task = await asyncio_queue.get()
+            log.info(f' consumer get task {task.type} {task.origin_task}')
+            asyncio.ensure_future(self._worker(task))
+
+    async def _worker(self, task):
         if task.type in self._handlers.keys():
-            log.info(f' Consumer processing task {task.type} {task.origin_task}')
-
+            log.info(f' worker processing task {task.type} {task.origin_task}')
             try:
                 handle = self._handlers[task.type]
                 result: WorkResult = await handle(self, context, task.payload)
