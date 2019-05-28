@@ -13,7 +13,7 @@ from .hook import HookTypes, HookHandler
 from .result import WorkResult, ResultAction
 
 import asyncio
-from asyncio import BaseEventLoop, sleep, Queue
+from asyncio import BaseEventLoop, sleep, Queue as AsyncioQueue
 from queues import Queues
 
 log = get_logger('dispatcher')
@@ -94,14 +94,14 @@ class Dispatcher:
         self._tube = tube
         self.prepare()
         loop = asyncio.get_event_loop()
-        asyncio_queue = asyncio.Queue(maxsize=5)
+        asyncio_queue = asyncio.Queue(loop=loop, maxsize=self.config.QUEUE_POOL_SIZE)
         try:
-            producers = [self._producer(asyncio_queue, id, self._tube) for id in range(self.config.WORKERS)]
-    
             self._before_start(loop)
-    
-            [loop.create_task(producer) for producer in producers]
-            loop.create_task(self._consumer(asyncio_queue))
+
+            asyncio.ensure_future(self._producer(asyncio_queue, self._tube))
+            consumers = [self._consumer(asyncio_queue, id) for id in range(self.config.WORKERS)]
+            [asyncio.ensure_future(consumer) for consumer in consumers]
+
             loop.run_forever()
             
             self._after_stop(loop)
@@ -113,27 +113,31 @@ class Dispatcher:
     def app_context(self) -> Context:
         return context
 
-    async def _producer(self, asyncio_queue, id: int, tube: str):
+    async def _producer(self, asyncio_queue: AsyncioQueue, tube: str):
         if not self.queues.is_connected:
             await self.queues.connect()
 
         while True:
-            task = await self.queues.take_task(tube)
+            if not asyncio_queue.full():
+                task = await self.queues.take_task(tube)
+            else:
+                continue
 
             if task is None:
                 continue
-            log.info(f'Producer [{id}] put task {task.type} {task.origin_task}')
             await asyncio_queue.put(task)
+            log.info(f'Producer put task {task.type} {task.origin_task}')
 
-    async def _consumer(self, asyncio_queue):
+    async def _consumer(self, asyncio_queue: AsyncioQueue, id: int):
         while True:
             task = await asyncio_queue.get()
-            log.info(f' consumer get task {task.type} {task.origin_task}')
-            asyncio.ensure_future(self._worker(task))
+            log.info(f'Consumer[{id}] get task {task.type} {task.origin_task}')
+            await self._process_task(task)
+            log.info(f'Consumer[{id}] finish task {task.type} {task.origin_task}')
 
-    async def _worker(self, task):
+    async def _process_task(self, task):
         if task.type in self._handlers.keys():
-            log.info(f' worker processing task {task.type} {task.origin_task}')
+            log.info(f'Processing task {task.type} {task.origin_task}')
             try:
                 handle = self._handlers[task.type]
                 result: WorkResult = await handle(self, context, task.payload)
