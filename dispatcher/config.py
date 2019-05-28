@@ -31,9 +31,10 @@ class GeneralConfig(BaseConfig):
     DEBUG: bool = False
     LOG_FORMAT: LogFormat = LogFormat.plain
     LOG_LEVEL: str = 'INFO'
-    WORKERS: int = 1
+    WORKERS: int = 1  # amount of task consumers
     TARANTOOL_HOST: str = '0.0.0.0'
     TARANTOOL_USER: str = ''
     TARANTOOL_PASSWORD: str = ''
     TARANTOOL_Q_PORT: int = 3301
-    QUEUE_POOL_SIZE: int = 5
+    QUEUE_POOL_SIZE: int = 5  # asyncio Queue pull size
+    RELEASE_DELAY: int = 10  # task release delay in seconds

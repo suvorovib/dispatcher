@@ -130,10 +130,13 @@ class Dispatcher:
 
     async def _consumer(self, asyncio_queue: AsyncioQueue, id: int):
         while True:
-            task = await asyncio_queue.get()
-            log.info(f'Consumer[{id}] get task {task.type} {task.origin_task}')
-            await self._process_task(task)
-            log.info(f'Consumer[{id}] finish task {task.type} {task.origin_task}')
+            try:
+                task = await asyncio_queue.get()
+                log.info(f'Consumer[{id}] get task {task.type} {task.origin_task}')
+                await self._process_task(task)
+                log.info(f'Consumer[{id}] finish task {task.type} {task.origin_task}')
+            except Exception as e:
+                log.error(f'Got exception in consumer[{id}]')
 
     async def _process_task(self, task):
         if task.type in self._handlers.keys():
@@ -143,7 +146,7 @@ class Dispatcher:
                 result: WorkResult = await handle(self, context, task.payload)
 
                 if result is None:
-                    result = WorkResult()
+                    result = WorkResult(delay=self.config.RELEASE_DELAY)
 
                 if result.action == ResultAction.ack:
                     await task.origin_task.ack()
@@ -153,4 +156,4 @@ class Dispatcher:
                     await task.origin_task.delete()
             except Exception as e:
                 log.error(f'Processing fail task {task.origin_task}:{e}')
-                await task.origin_task.delete()
+                await task.origin_task.ack()
