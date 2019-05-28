@@ -36,3 +36,4 @@ class GeneralConfig(BaseConfig):
     TARANTOOL_USER: str = ''
     TARANTOOL_PASSWORD: str = ''
     TARANTOOL_Q_PORT: int = 3301
+    QUEUE_POOL_SIZE: int = 5
