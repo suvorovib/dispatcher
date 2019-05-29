@@ -98,9 +98,9 @@ class Dispatcher:
         try:
             self._before_start(loop)
 
-            asyncio.ensure_future(self._producer(asyncio_queue, self._tube))
+            loop.create_task(self._producer(asyncio_queue, self._tube))
             consumers = [self._consumer(asyncio_queue, id) for id in range(self.config.WORKERS)]
-            [asyncio.ensure_future(consumer) for consumer in consumers]
+            [loop.create_task(consumer) for consumer in consumers]
 
             loop.run_forever()
             
@@ -120,13 +120,12 @@ class Dispatcher:
         while True:
             if not asyncio_queue.full():
                 task = await self.queues.take_task(tube)
+                if task is None:
+                    continue
+                await asyncio_queue.put(task)
+                log.info(f'Producer put task {task.type} {task.origin_task}')
             else:
-                continue
-
-            if task is None:
-                continue
-            await asyncio_queue.put(task)
-            log.info(f'Producer put task {task.type} {task.origin_task}')
+                await asyncio_queue.join()
 
     async def _consumer(self, asyncio_queue: AsyncioQueue, id: int):
         while True:
@@ -134,9 +133,10 @@ class Dispatcher:
                 task = await asyncio_queue.get()
                 log.info(f'Consumer[{id}] get task {task.type} {task.origin_task}')
                 await self._process_task(task)
+                asyncio_queue.task_done()
                 log.info(f'Consumer[{id}] finish task {task.type} {task.origin_task}')
             except Exception as e:
-                log.error(f'Got exception in consumer[{id}]')
+                log.error(f'Got exception in consumer[{id}] {e}')
 
     async def _process_task(self, task):
         if task.type in self._handlers.keys():
