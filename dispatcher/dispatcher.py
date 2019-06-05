@@ -94,15 +94,15 @@ class Dispatcher:
         self._tube = tube
         self.prepare()
         loop = asyncio.get_event_loop()
-        asyncio_queue = asyncio.Queue(loop=loop, maxsize=self.config.QUEUE_POOL_SIZE)
+        # asyncio_queue = asyncio.Queue(loop=loop, maxsize=self.config.QUEUE_POOL_SIZE)
         try:
             self._before_start(loop)
 
-            loop.create_task(self._producer(asyncio_queue, self._tube))
-            consumers = [self._consumer(asyncio_queue, id) for id in range(self.config.WORKERS)]
-            [loop.create_task(consumer) for consumer in consumers]
+            # loop.create_task(self._producer(asyncio_queue, self._tube))
+            consumers = [self._consumer(self._tube, id) for id in range(self.config.WORKERS)]
+            # [loop.create_task(consumer) for consumer in consumers]
 
-            loop.run_forever()
+            loop.run_until_complete(asyncio.wait(consumers))
             
             self._after_stop(loop)
         except Exception as e:
@@ -113,27 +113,28 @@ class Dispatcher:
     def app_context(self) -> Context:
         return context
 
-    async def _producer(self, asyncio_queue: AsyncioQueue, tube: str):
-        if not self.queues.is_connected:
+    # async def _producer(self, asyncio_queue: AsyncioQueue, ):
+    #     if not self.queues.is_connected:
+    #         await self.queues.connect()
+    #
+    #     while True:
+    #         if not asyncio_queue.full():
+    #             task =
+    #             if task is None:
+    #                 continue
+    #             await asyncio_queue.put(task)
+    #             log.info(f'Producer put task {task.type} {task.origin_task}')
+    #         else:
+    #             await asyncio_queue.join()
+
+    async def _consumer(self, tube: str, id: int):
+        if self.queues.is_connected == False:
             await self.queues.connect()
-
-        while True:
-            if not asyncio_queue.full():
-                task = await self.queues.take_task(tube)
-                if task is None:
-                    continue
-                await asyncio_queue.put(task)
-                log.info(f'Producer put task {task.type} {task.origin_task}')
-            else:
-                await asyncio_queue.join()
-
-    async def _consumer(self, asyncio_queue: AsyncioQueue, id: int):
         while True:
             try:
-                task = await asyncio_queue.get()
+                task = await self.queues.take_task(tube)
                 log.info(f'Consumer[{id}] get task {task.type} {task.origin_task}')
                 await self._process_task(task)
-                asyncio_queue.task_done()
                 log.info(f'Consumer[{id}] finish task {task.type} {task.origin_task}')
             except Exception as e:
                 log.error(f'Got exception in consumer[{id}] {e}')
